@@ -39,8 +39,6 @@ dependencies = [
     "streamlit>=1.52.1",
     "timm==0.4.12",
     "tokenizers>=0.11.2",
-    "torchaudio>=2.9.1",
-    "torchvision>=0.24.1",
     "tqdm>=4.67.1",
     "transformers==4.33.2",
     "webdataset>=1.0.2",
