@@ -19,6 +19,7 @@ dependencies = [
     "nltk>=3.9.2",
     "numpy==1.26",
     "omegaconf>=2.3.0",
+    "open-clip-torch>=2.32.0",
     "opencv-python==4.8.0.74",
     "opencv-python-headless==4.5.5.64",
     "opendatasets>=0.1.22",

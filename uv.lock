@@ -1395,6 +1395,25 @@ wheels = [
 ]
 
 [[package]]
+name = "open-clip-torch"
+version = "2.32.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "ftfy" },
+    { name = "huggingface-hub" },
+    { name = "regex" },
+    { name = "safetensors" },
+    { name = "timm" },
+    { name = "torch" },
+    { name = "torchvision" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6d/7b/fd38dfd522968135dce71d0b543c2ae776f9c8e27df6ad46b63bab09eef7/open_clip_torch-2.32.0.tar.gz", hash = "sha256:0220bc111162527eb738c1fe20dbfd6ea45dfe44726b54a4de18d3945d8f2f00", size = 1491248, upload-time = "2025-04-05T21:55:24.51Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/f9/0458745c1d299411161ee3b6c32228a3de0be1d8497d779fd7f17a8e96aa/open_clip_torch-2.32.0-py3-none-any.whl", hash = "sha256:80b35b43e37afc2b6173aa5ab0ad68744ab3a3211e624f72dfe743a162707637", size = 1528783, upload-time = "2025-04-05T21:55:22.967Z" },
+]
+
+[[package]]
 name = "opencv-python"
 version = "4.8.0.74"
 source = { registry = "https://pypi.org/simple" }
@@ -3293,6 +3312,7 @@ dependencies = [
     { name = "nltk" },
     { name = "numpy" },
     { name = "omegaconf" },
+    { name = "open-clip-torch" },
     { name = "opencv-python" },
     { name = "opencv-python-headless" },
     { name = "opendatasets" },
@@ -3335,6 +3355,7 @@ requires-dist = [
     { name = "nltk", specifier = ">=3.9.2" },
     { name = "numpy", specifier = "==1.26" },
     { name = "omegaconf", specifier = ">=2.3.0" },
+    { name = "open-clip-torch", specifier = ">=2.32.0" },
     { name = "opencv-python", specifier = "==4.8.0.74" },
     { name = "opencv-python-headless", specifier = "==4.5.5.64" },
     { name = "opendatasets", specifier = ">=0.1.22" },

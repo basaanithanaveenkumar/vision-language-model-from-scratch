@@ -1,3 +1,6 @@
+
+import torch.nn as nn
+
 class LMHead(nn.Module):
     """LM head with layer normalization for better training stability"""
     def __init__(self, hidden_size, vocab_size):
