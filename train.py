@@ -410,10 +410,11 @@ class BasicVLMTrainer:
         
         return visualizations
 
-    def generate_token_prediction_video(self, images, input_ids, outputs, step=0, fps=2, num_samples=1, num_img_tokens=196):
+    def generate_token_prediction_video(self, images, input_ids, outputs, step=0, fps=2, num_samples=1, num_img_tokens=196, num_question_tokens=4):
         """
         Generate visually enhanced video showing token-by-token predictions with circular tokens
         num_img_tokens: Number of vision tokens prepended before text tokens
+        num_question_tokens: Number of question tokens before answer starts
         """
         try:
             import imageio
@@ -434,6 +435,7 @@ class BasicVLMTrainer:
             'incorrect': (255, 85, 85),   # Red for incorrect
             'gt_text': (139, 233, 253),   # Cyan for GT
             'pred_text': (189, 147, 249), # Purple for predictions
+            'question': (255, 193, 7),    # Amber for questions
             'accent': (255, 184, 108),    # Orange accent
             'progress': (98, 114, 164),   # Blue-gray for progress bar
             'text': (248, 248, 242),      # Off-white text
@@ -455,9 +457,17 @@ class BasicVLMTrainer:
                 text_predictions = predictions[num_img_tokens:]
                 text_confidences = confidences[num_img_tokens:]
                 
-                # Ground truth alignment: input_ids doesn't include vision tokens
-                # GT for position i in text_predictions is input_ids[i+1] (shifted right by 1)
+                # Separate question and answer tokens
+                question_predictions = text_predictions[:num_question_tokens]
+                answer_predictions = text_predictions[num_question_tokens:]
+                
+                question_confidences = text_confidences[:num_question_tokens]
+                answer_confidences = text_confidences[num_question_tokens:]
+                
+                # Ground truth alignment
                 ground_truth = input_ids[idx, 1:]  # Remove BOS/first token
+                question_gt = ground_truth[:num_question_tokens]
+                answer_gt = ground_truth[num_question_tokens:]
                 
                 # Load fonts with multiple sizes
                 try:
@@ -469,7 +479,7 @@ class BasicVLMTrainer:
                     title_font = text_font = small_font = mono_font = ImageFont.load_default()
                 
                 # Enhanced video dimensions
-                panel_height = 250  # Increased for vision token indicator
+                panel_height = 350  # Increased for question section
                 video_width = max(img_width, 800)
                 video_height = img_height + panel_height
                 
@@ -531,20 +541,73 @@ class BasicVLMTrainer:
                     draw.rectangle([x_margin, y_offset, x_margin + fill_width, y_offset + bar_height], 
                                 fill=COLORS['accent'])
                     # Progress text
-                    progress_text = f"{pos + 1}/{max_tokens} text tokens"
+                    progress_text = f"{pos + 1}/{max_tokens} tokens"
                     draw.text((video_width - x_margin - 130, y_offset - 2), progress_text, 
                             fill=COLORS['dim'], font=small_font)
                     
                     y_offset += 25
                     
-                    # Ground Truth Section
-                    draw.text((x_margin, y_offset), "GROUND TRUTH", fill=COLORS['gt_text'], font=title_font)
+                    # Question Section (only show if we're past question tokens)
+                    if pos >= num_question_tokens:
+                        draw.text((x_margin, y_offset), "QUESTION", fill=COLORS['question'], font=title_font)
+                        y_offset += 28
+                        
+                        # Draw question tokens (all at once)
+                        x_pos = x_margin
+                        ellipse_height = 28
+                        for i in range(num_question_tokens):
+                            if i >= len(question_predictions):
+                                break
+                            
+                            pred_token = question_predictions[i].item()
+                            if self.tokenizer:
+                                try:
+                                    decoded = self.tokenizer.decode([pred_token]).strip()
+                                    if not decoded or decoded in ['[CLS]', '[SEP]', '[PAD]']:
+                                        decoded = f"[{pred_token}]"
+                                except:
+                                    decoded = f"[{pred_token}]"
+                            else:
+                                decoded = f"[{pred_token}]"
+                            
+                            text_bbox = draw.textbbox((0, 0), decoded, font=small_font)
+                            text_width = text_bbox[2] - text_bbox[0]
+                            ellipse_width = max(text_width + 16, ellipse_height)
+                            
+                            if x_pos + ellipse_width > video_width - x_margin:
+                                break
+                            
+                            center_x = x_pos + ellipse_width // 2
+                            center_y = y_offset + ellipse_height // 2
+                            
+                            # Draw ellipse with question color
+                            draw.ellipse([x_pos, y_offset, x_pos + ellipse_width, y_offset + ellipse_height],
+                                        fill=(50, 55, 65), outline=COLORS['question'], width=2)
+                            
+                            # Center text
+                            text_x = center_x - text_width // 2
+                            text_y = center_y - 6
+                            draw.text((text_x, text_y), decoded, fill=COLORS['question'], font=small_font)
+                            
+                            x_pos += ellipse_width + 6
+                        
+                        y_offset += 38
+                    
+                    # Ground Truth Section (for answer part)
+                    if pos < num_question_tokens:
+                        section_label = "GROUND TRUTH (Question + Answer)"
+                    else:
+                        section_label = "GROUND TRUTH (Answer)"
+                        
+                    draw.text((x_margin, y_offset), section_label, fill=COLORS['gt_text'], font=title_font)
                     y_offset += 28
                     
-                    # Draw GT tokens as circles/ellipses
+                    # Draw GT tokens
                     x_pos = x_margin
                     ellipse_height = 32
-                    for i, token in enumerate(gt_tokens[:pos + 1]):
+                    display_end = pos + 1 if pos < num_question_tokens else (pos + 1)
+                    
+                    for i, token in enumerate(gt_tokens[:display_end]):
                         # Calculate ellipse width
                         text_bbox = draw.textbbox((0, 0), token, font=mono_font)
                         text_width = text_bbox[2] - text_bbox[0]
@@ -556,14 +619,18 @@ class BasicVLMTrainer:
                         center_x = x_pos + ellipse_width // 2
                         center_y = y_offset + ellipse_height // 2
                         
+                        # Use different color for question tokens
+                        outline_color = COLORS['question'] if i < num_question_tokens else COLORS['gt_text']
+                        text_color = COLORS['question'] if i < num_question_tokens else COLORS['gt_text']
+                        
                         # Draw ellipse
                         draw.ellipse([x_pos, y_offset, x_pos + ellipse_width, y_offset + ellipse_height],
-                                    fill=(50, 55, 65), outline=COLORS['gt_text'], width=2)
+                                    fill=(50, 55, 65), outline=outline_color, width=2)
                         
                         # Center text
                         text_x = center_x - text_width // 2
                         text_y = center_y - 7
-                        draw.text((text_x, text_y), token, fill=COLORS['gt_text'], font=mono_font)
+                        draw.text((text_x, text_y), token, fill=text_color, font=mono_font)
                         
                         x_pos += ellipse_width + 8
                     
@@ -572,17 +639,31 @@ class BasicVLMTrainer:
                     # Prediction Section
                     draw.text((x_margin, y_offset), "PREDICTIONS", fill=COLORS['pred_text'], font=title_font)
                     
-                    # Calculate accuracy
+                    # Calculate accuracy (only for answer part if past questions)
                     correct_count = 0
-                    for i in range(pos + 1):
-                        if i < len(ground_truth) and text_predictions[i].item() == ground_truth[i].item():
-                            correct_count += 1
-                    accuracy = (correct_count / (pos + 1)) * 100
+                    total_count = pos + 1
+                    
+                    if pos >= num_question_tokens:
+                        # Only count answer accuracy
+                        answer_pos = pos - num_question_tokens
+                        for i in range(answer_pos + 1):
+                            if i < len(answer_gt) and answer_predictions[i].item() == answer_gt[i].item():
+                                correct_count += 1
+                        total_count = answer_pos + 1
+                        acc_label = "Answer Acc:"
+                    else:
+                        # Include all tokens
+                        for i in range(pos + 1):
+                            if i < len(ground_truth) and text_predictions[i].item() == ground_truth[i].item():
+                                correct_count += 1
+                        acc_label = "Acc:"
+                    
+                    accuracy = (correct_count / max(total_count, 1)) * 100
                     
                     # Draw accuracy badge
-                    acc_text = f"Acc: {accuracy:.0f}%"
+                    acc_text = f"{acc_label} {accuracy:.0f}%"
                     acc_color = COLORS['correct'] if accuracy >= 70 else (COLORS['accent'] if accuracy >= 50 else COLORS['incorrect'])
-                    draw.text((video_width - x_margin - 120, y_offset), acc_text, 
+                    draw.text((video_width - x_margin - 150, y_offset), acc_text, 
                             fill=acc_color, font=title_font)
                     
                     y_offset += 28
@@ -605,7 +686,12 @@ class BasicVLMTrainer:
                         
                         # Check correctness
                         is_correct = (i < len(ground_truth) and pred_token == ground_truth[i].item())
-                        token_color = COLORS['correct'] if is_correct else COLORS['incorrect']
+                        
+                        # Use question color for first 4 tokens, then correct/incorrect
+                        if i < num_question_tokens:
+                            token_color = COLORS['question']
+                        else:
+                            token_color = COLORS['correct'] if is_correct else COLORS['incorrect']
                         
                         # Calculate ellipse dimensions
                         text_bbox = draw.textbbox((0, 0), decoded, font=mono_font)
@@ -665,10 +751,6 @@ class BasicVLMTrainer:
                 continue
         
         return saved_paths
-
-
-
-
 
     def train_epoch(self, epoch):
         self.model.train()
