@@ -1,7 +1,6 @@
-# VLM Multi-Token Prediction
+# Halo VLM - Multi-Token Prediction
 
-A PyTorch-based Vision-Language Model (VLM) implementation for Image Q&A with support for multi-token prediction. This project combines  vision encoders with transformer-based language modeling to enable efficient image understanding and text generation.
-
+A PyTorch-based Vision-Language Model (VLM) implementation for Image Q&A with support for multi-token prediction. **Halo VLM** combines vision encoders with transformer-based language modeling to enable efficient image understanding and text generation.
 ## Overview
 
 This project implements a **BasicVLM** model that:
