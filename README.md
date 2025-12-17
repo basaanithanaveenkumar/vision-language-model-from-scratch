@@ -1,99 +1,103 @@
-# vlm-multi_token_prediction
-Multi-token prediction in Vision-Language Models (VLMs) is an advanced training and inference technique that enables models to predict multiple future tokens simultaneously, rather than one token at a time. This approach has emerged as a promising area for improving efficiency, model performance, and inference speed.
+# VLM Multi-Token Prediction
 
+A PyTorch-based Vision-Language Model (VLM) implementation for Image Q&A with support for multi-token prediction. This project combines OpenCLIP vision encoders with transformer-based language modeling to enable efficient image understanding and text generation.
 
+## Overview
 
+This project implements a **BasicVLM** model that:
+- 🖼️ Encodes images using OpenCLIP (ViT-B-32)
+- 🔗 Projects image features to language embedding space
+- 📝 Generates text through next-token prediction
+- 📊 Supports TensorBoard visualization with image predictions
+- ⚡ Optimized for GPU training (12GB+ VRAM recommended)
 
+## Features
 
-## Environment Setup
+✅ **Core Architecture**
+- OpenCLIP vision encoder (frozen or fine-tuned)
+- Linear image projector with dimension alignment
+- Transformer decoder with 24 layers, 8 attention heads
+- Causal masking for autoregressive generation
+- Sinusoidal positional embeddings
 
-### 1. Install `uv` and Create Environment
+✅ **Training Infrastructure**
+- Gradient clipping and learning rate scheduling (Cosine Annealing)
+- Comprehensive gradient monitoring and statistics
+- Automatic checkpoint saving (best model + epoch-wise)
+
+✅ **Logging & Visualization**
+- TensorBoard integration for training metrics
+- Per-layer gradient and weight histograms
+- Ground truth vs. predicted token comparison with color-coded accuracy
+- Position-wise analysis for debugging predictions
+
+✅ **Data Handling**
+- COCO Caption dataset integration via LAVIS
+- Configurable batch size and sequence length
+- Proper next-token prediction target construction
+- Data validation for input/target alignment
+
+## Project Structure
+
+```
+vlm-multi_token_prediction/
+├── models/                          # Core model components
+│   ├── vlm.py                      # BasicVLM model definition
+│   ├── vision_encoder.py           # OpenCLIP encoder wrapper
+│   ├── image_proj.py               # Image-to-text projection
+│   ├── transformer.py              # Transformer blocks (attention, FFN)
+│   ├── positional_embeddings.py    # Sinusoidal PE implementation
+│   ├── lm_head.py                  # Language modeling head
+│   ├── open_clipencoder.py         # OpenCLIP wrapper
+│   └── CLIP.py                     # CLIP model utilities
+├── train.py                         # Main trainer class with TensorBoard logging
+├── dataloader.py                    # Data loading and preprocessing
+├── config/                          # Configuration files
+├── utils/                           # Utility functions
+├── docs/                            # Documentation
+└── README.md                        # This file
+```
+
+## Installation
+
+### 1. Environment Setup with `uv`
+
 ```bash
-# Install uv package manager
-curl -LsSf [https://astral.sh/uv/install.sh](https://astral.sh/uv/install.sh) | sh
-source ~/.bashrc  # or ~/.zshrc
+# Install uv package manager (fast Python package manager)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc  # or ~/.zshrc for macOS
 uv --version
 ```
 
+### 2. Clone Repository & Install Dependencies
 
-# project structure
+```bash
+git clone <repository-url>
+cd vlm-multi_token_prediction
 
+# Install dependencies using uv
+```
 
-# this project is inspired from fastvlm from apple
+### 3. Download COCO Dataset (Optional)
 
-Need to write code
+```bash
+# Create cache directory
+mkdir -p ~/.cache/lavis/coco
 
-1. efficeinet vision encoder
-2. efficient vision projector
-3. search for efficeint high accuray vlm at low parameter size 
+# Download COCO dataset and check by using below command
+python -c "from lavis.datasets.builders import load_dataset; \
+           dataset = load_dataset('coco_caption')"
+```
 
+### Data Loading Issues
+```bash
+# Set LAVIS cache directory
+export LAVIS_CACHE_DIR=/path/to/cache
+```
 
-# the above needs to fit in 12 GB VRAM GPU
-
-
-# TODO while using the lavis change the cache directory
-
-
-# 2
-
-cd /home/ha/.cache/lavis/coco/
-# Or create it if it doesn't exist
-mkdir -p /home/ha/.cache/lavis/coco/
-
-# Clone LAVIS repo temporarily for the download script
-git clone https://github.com/salesforce/LAVIS.git /tmp/lavis_download
-cd /tmp/lavis_download
-
-# Run the COCO download script
-python datasets/download_scripts/download_coco.py --storage_dir /home/ha/.cache/lavis/coco/
-
-
-1. use DINO v3 as backbone
-2. finetune in a clip way
-3. add MLP projector
-4. add language model 
-5. train
-
-
-TODO 
-1. Build fastVITHD /FastVIT paper
-2. write a mlp projector
-3. read the mobile clip paper and train using modbile clip
-
-
-# intern VL
-# Qwen inspiration
-
-
-Integration via timm & open_clip (Best for Training)
-
-The most robust way to train a CLIP model with a DINOv3 backbone is to use the timm library's integration within the open_clip framework.
-
-    Repo: huggingface/pytorch-image-models (timm)
-
-        Update: Added DINOv3 support in v1.0.20+ (Sept 2025).
-
-    Repo: mlfoundations/open_clip
-
-        How to use: Since timm now supports DINOv3, you can use open_clip to train a model by specifying the DINOv3 backbone via the timm bridge.
-
-        Command Pattern:
-        Bash
-
-        python -m open_clip_train.main \
-            --model "timm-vit_large_patch14_dinov3" \
-            --train-data "path/to/laion_or_coco"
-
-        Note: You may need to freeze the DINOv3 backbone (--lock-image) to train only the text projection, effectively creating a "LiT" (Locked-image Tuning) model.
-
-3. Community Tools & Adapters
-
-These repositories provide lightweight ways to align DINOv3 with text without full retraining.
-
-    Repo: mikkoim/dinotool
-
-        Purpose: A CLI tool to extract and align features from DINOv3, DINOv2, and CLIP. Good for inference and feature analysis.
-
-    Repo: wysoczanska/clip_dinoiser
-
-        Purpose: While originally for DINOv2, this repo implements the "DINO-CLIP" bridging logic (often called "teaching CLIP a few DINO tricks"). It is a strong reference for applying similar masking and alignment techniques to DINOv3.
+## Future Work
+- [ ] fix minor bugs
+- [ ] Multi-token  prediction with speculative decoding
+- [ ] Mixed precision training (FP16/BF16)
+- [ ] CLIP style pretraining (not part of this repo)
+- [ ] LLM style pretraining (not part of this repo)

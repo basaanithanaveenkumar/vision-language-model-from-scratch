@@ -33,4 +33,4 @@ class SinusoidalPositionalEmbedding(nn.Module):
             Tensor with positional embeddings added
         """
         seq_len = x.size(1)
-        return x + self.pe[:, :seq_len, :]
+        return x + self.pe[:, :seq_len, :].detach()  # Detach to avoid gradients

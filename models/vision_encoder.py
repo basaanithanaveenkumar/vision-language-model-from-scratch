@@ -3,7 +3,7 @@ import torch.nn as nn
 import timm
 
 class VisionEncoder(nn.Module):
-    def __init__(self, model_name='vit_small_patch16_dinov3_qkvb.lvd1689m', 
+    def __init__(self, model_name='vit_small_patch16_224.dino', 
                  freeze=True, output_dim=None):
         super().__init__()
         
@@ -11,7 +11,6 @@ class VisionEncoder(nn.Module):
         self.model = timm.create_model(
             model_name, 
             pretrained=True,
-            num_classes=0  # Remove classification head
         )
         
         # Freeze weights if needed
@@ -23,6 +22,7 @@ class VisionEncoder(nn.Module):
         self.feature_dim = self.model.embed_dim
         
         # Optional projection layer
+        # TODO redundant code with image_proj.py
         self.projection = None
         if output_dim:
             self.projection = nn.Linear(self.feature_dim, output_dim)
@@ -36,8 +36,6 @@ class VisionEncoder(nn.Module):
         # Extract features
         features = self.model.forward_features(x)
         
-        # Average over patches (for ViT) -> [batch, feature_dim]
-        features = features.mean(dim=1)
         
         # Apply projection if exists
         if self.projection:
@@ -49,7 +47,7 @@ class VisionEncoder(nn.Module):
 if __name__ == "__main__":
     # Create encoder
     encoder = VisionEncoder(
-        model_name='vit_small_patch16_dinov3_qkvb.lvd1689m',
+        model_name='vit_base_patch16_224',
         freeze=True,
         output_dim=512
     ).cuda()
