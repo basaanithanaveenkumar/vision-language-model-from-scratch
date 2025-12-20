@@ -409,349 +409,213 @@ class BasicVLMTrainer:
             visualizations.append(canvas)
         
         return visualizations
-
     def generate_token_prediction_video(self, images, input_ids, outputs, step=0, fps=2, num_samples=1, num_img_tokens=196, num_question_tokens=4):
         """
-        Generate visually enhanced video showing token-by-token predictions with circular tokens
-        num_img_tokens: Number of vision tokens prepended before text tokens
-        num_question_tokens: Number of question tokens before answer starts
+        Generate video with sharp text and clear spacing between tokens.
         """
         try:
             import imageio
             import cv2
+            import numpy as np
+            from PIL import Image, ImageDraw, ImageFont
         except ImportError:
-            print("Warning: imageio or cv2 not installed. Install with: pip install imageio opencv-python")
+            print("Warning: libraries not installed. pip install imageio opencv-python numpy pillow")
             return []
         
         os.makedirs('./videos', exist_ok=True)
         num_samples = min(num_samples, images.size(0))
         saved_paths = []
-        
-        # Enhanced color palette
-        COLORS = {
-            'bg': (25, 28, 35),           # Dark background
-            'panel_bg': (40, 44, 52),     # Panel background
-            'correct': (80, 250, 123),    # Green for correct
-            'incorrect': (255, 85, 85),   # Red for incorrect
-            'gt_text': (139, 233, 253),   # Cyan for GT
-            'pred_text': (189, 147, 249), # Purple for predictions
-            'question': (255, 193, 7),    # Amber for questions
-            'accent': (255, 184, 108),    # Orange accent
-            'progress': (98, 114, 164),   # Blue-gray for progress bar
-            'text': (248, 248, 242),      # Off-white text
-            'dim': (155, 155, 155),       # Dimmed text
-            'vision': (255, 121, 198)     # Pink for vision tokens
+        # TODO Move this color config into the json loadable
+        # Enhanced Color Palette (High contrast for sharpness)
+        COLORS  = {
+            'overlay_bg': (20, 21, 26, 200),    # Deep Blue-Black (High opacity for text legibility)
+            'correct': (50, 255, 126),          # Neon Mint Green (Clear success indicator)
+            'incorrect': (255, 71, 87),         # Neon Coral Red (Clear error indicator)
+            'gt_text': (24, 220, 255),          # Electric Cyan (Ground Truth)
+            'pred_text': (197, 108, 240),       # Bright Lavender (Predictions)
+            'question': (255, 242, 0),          # Electric Yellow (Questions)
+            'header': (200, 214, 229),          # Cool White-Grey (Headers)
+            'vision_info': (255, 159, 243),     # Neon Pink (Metadata)
+            'separator': (255, 255, 255, 50)    # Subtle White (Dividers)
         }
+        
+        # Spacing Configuration
+        TOKEN_PADDING = 12  # Space (pixels) between each token
+        LINE_HEIGHT = 35    # Vertical space between lines
         
         for sample_idx in range(num_samples):
             try:
                 idx = sample_idx
-                img = self.tensor_to_image(images[idx:idx+1])
-                img_width, img_height = img.size
+                # Process Image
+                img_tensor = images[idx:idx+1]
+                base_img = self.tensor_to_image(img_tensor).convert("RGBA")
+                img_width, img_height = base_img.size
                 
+                # Logic to handle model outputs
                 logits = outputs[idx]
                 predictions = torch.argmax(logits, dim=-1)
-                confidences = torch.softmax(logits, dim=-1).max(dim=-1)[0]
                 
-                # Skip vision tokens - text tokens start after num_img_tokens
+                # Slicing tokens
                 text_predictions = predictions[num_img_tokens:]
-                text_confidences = confidences[num_img_tokens:]
+                ground_truth = input_ids[idx, 1:] 
                 
-                # Separate question and answer tokens
-                question_predictions = text_predictions[:num_question_tokens]
-                answer_predictions = text_predictions[num_question_tokens:]
-                
-                question_confidences = text_confidences[:num_question_tokens]
-                answer_confidences = text_confidences[num_question_tokens:]
-                
-                # Ground truth alignment
-                ground_truth = input_ids[idx, 1:]  # Remove BOS/first token
-                question_gt = ground_truth[:num_question_tokens]
-                answer_gt = ground_truth[num_question_tokens:]
-                
-                # Load fonts with multiple sizes
+                # Setup Fonts - Prioritizing Bold for Sharpness
                 try:
-                    title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
-                    text_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
-                    small_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 12)
-                    mono_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", 13)
+                    # Linux standard paths
+                    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+                    # Try to load; if fails, fall back to default
+                    main_font = ImageFont.truetype(font_path, 20)  # Larger size for sharpness
+                    header_font = ImageFont.truetype(font_path, 15)
+                    small_font = ImageFont.truetype(font_path, 13)
                 except:
-                    title_font = text_font = small_font = mono_font = ImageFont.load_default()
+                    # Fallback if specific font not found
+                    main_font = header_font = small_font = ImageFont.load_default()
+
+                # Video Dimensions
+                video_width = max(img_width, 900)  # Slightly wider to accommodate spaced text
+                video_height = max(img_height, 700)
                 
-                # Enhanced video dimensions
-                panel_height = 350  # Increased for question section
-                video_width = max(img_width, 800)
-                video_height = img_height + panel_height
-                
+                if base_img.size != (video_width, video_height):
+                    base_img = base_img.resize((video_width, video_height), Image.Resampling.LANCZOS)
+
                 frames = []
-                max_tokens = min(20, len(text_predictions))
+                max_tokens = min(30, len(text_predictions))
                 
-                # Pre-compute ground truth tokens
-                gt_tokens = []
+                # Pre-decode GT
+                gt_words = []
                 for token_id in ground_truth[:max_tokens]:
-                    token_id_item = token_id.item()
-                    if self.tokenizer:
-                        try:
-                            decoded = self.tokenizer.decode([token_id_item]).strip()
-                            if decoded and decoded not in ['[CLS]', '[SEP]', '[PAD]']:
-                                gt_tokens.append(decoded)
-                        except:
-                            gt_tokens.append(f"[{token_id_item}]")
-                    else:
-                        gt_tokens.append(f"[{token_id_item}]")
-                
-                # Generate frames
+                    try:
+                        # Replace special tokenizer chars with visual space or empty
+                        word = self.tokenizer.decode([token_id.item()]).replace("Ġ", "")
+                        if word.strip() == "": word = "␣" # Visual placeholder for pure space tokens
+                        gt_words.append(word)
+                    except:
+                        gt_words.append("?")
+
+                # Animation Loop
                 for pos in range(max_tokens):
-                    # Create frame
-                    frame_img = Image.new('RGB', (video_width, video_height), color=COLORS['bg'])
+                    # 1. Base Frame
+                    frame = base_img.copy()
                     
-                    # Resize and center image
-                    if img_width < video_width:
-                        offset_x = (video_width - img_width) // 2
-                        frame_img.paste(img, (offset_x, 0))
-                    else:
-                        frame_img.paste(img, (0, 0))
+                    # 2. Overlay
+                    overlay = Image.new('RGBA', (video_width, video_height), (0,0,0,0))
+                    draw = ImageDraw.Draw(overlay)
                     
-                    draw = ImageDraw.Draw(frame_img)
+                    # Panel Logic
+                    panel_h = int(video_height * 0.45)
+                    panel_y = video_height - panel_h
                     
-                    # Draw panel background
-                    panel_y = img_height
-                    draw.rectangle([0, panel_y, video_width, video_height], fill=COLORS['panel_bg'])
+                    # Background
+                    draw.rectangle([(0, panel_y), (video_width, video_height)], fill=COLORS['overlay_bg'])
+                    draw.line([(0, panel_y), (video_width, panel_y)], fill=COLORS['separator'], width=2)
                     
-                    # Draw accent line separator
-                    draw.rectangle([0, panel_y, video_width, panel_y + 3], fill=COLORS['accent'])
+                    margin_x = 30
+                    current_y = panel_y + 25
                     
-                    y_offset = panel_y + 15
-                    x_margin = 20
+                    # --- HEADER ---
+                    draw.text((margin_x, current_y), f"Vision Tokens: {num_img_tokens}", fill=COLORS['vision_info'], font=small_font)
                     
-                    # Vision tokens indicator
-                    vision_info = f"Vision Tokens: {num_img_tokens} (processed)"
-                    draw.text((x_margin, y_offset), vision_info, fill=COLORS['vision'], font=small_font)
-                    y_offset += 20
-                    
-                    # Progress bar
-                    progress = (pos + 1) / max_tokens
-                    bar_width = video_width - 2 * x_margin
-                    bar_height = 8
-                    # Background bar
-                    draw.rectangle([x_margin, y_offset, x_margin + bar_width, y_offset + bar_height], 
-                                fill=COLORS['progress'], outline=COLORS['dim'])
-                    # Progress fill
-                    fill_width = int(bar_width * progress)
-                    draw.rectangle([x_margin, y_offset, x_margin + fill_width, y_offset + bar_height], 
-                                fill=COLORS['accent'])
-                    # Progress text
-                    progress_text = f"{pos + 1}/{max_tokens} tokens"
-                    draw.text((video_width - x_margin - 130, y_offset - 2), progress_text, 
-                            fill=COLORS['dim'], font=small_font)
-                    
-                    y_offset += 25
-                    
-                    # Question Section (only show if we're past question tokens)
+                    # Accuracy
                     if pos >= num_question_tokens:
-                        draw.text((x_margin, y_offset), "QUESTION", fill=COLORS['question'], font=title_font)
-                        y_offset += 28
+                        matches = 0
+                        count = 0
+                        for i in range(num_question_tokens, pos + 1):
+                            if i < len(ground_truth) and text_predictions[i] == ground_truth[i]:
+                                matches += 1
+                            count += 1
+                        acc = (matches / max(count, 1)) * 100
+                        acc_text = f"Accuracy: {acc:.1f}%"
+                        acc_color = COLORS['correct'] if acc > 70 else COLORS['incorrect']
                         
-                        # Draw question tokens (all at once)
-                        x_pos = x_margin
-                        ellipse_height = 28
-                        for i in range(num_question_tokens):
-                            if i >= len(question_predictions):
-                                break
+                        bbox = draw.textbbox((0,0), acc_text, font=header_font)
+                        draw.text((video_width - margin_x - (bbox[2]-bbox[0]), current_y), acc_text, fill=acc_color, font=header_font)
+                    
+                    current_y += 30
+                    
+                    # --- GROUND TRUTH ---
+                    draw.text((margin_x, current_y), "GROUND TRUTH:", fill=COLORS['header'], font=header_font)
+                    current_y += 25
+                    
+                    gt_x = margin_x
+                    gt_line_y = current_y
+                    
+                    for i in range(min(pos + 5, len(gt_words))):
+                        word = gt_words[i]
+                        color = COLORS['question'] if i < num_question_tokens else COLORS['gt_text']
+                        
+                        draw.text((gt_x, gt_line_y), word, fill=color, font=main_font)
+                        
+                        # Spacing logic
+                        w_bbox = draw.textbbox((0,0), word, font=main_font)
+                        word_width = w_bbox[2] - w_bbox[0]
+                        gt_x += word_width + TOKEN_PADDING  # Add padding between tokens
+                        
+                        if gt_x > video_width - margin_x - 50:
+                            gt_x = margin_x
+                            gt_line_y += LINE_HEIGHT
                             
-                            pred_token = question_predictions[i].item()
-                            if self.tokenizer:
-                                try:
-                                    decoded = self.tokenizer.decode([pred_token]).strip()
-                                    if not decoded or decoded in ['[CLS]', '[SEP]', '[PAD]']:
-                                        decoded = f"[{pred_token}]"
-                                except:
-                                    decoded = f"[{pred_token}]"
-                            else:
-                                decoded = f"[{pred_token}]"
-                            
-                            text_bbox = draw.textbbox((0, 0), decoded, font=small_font)
-                            text_width = text_bbox[2] - text_bbox[0]
-                            ellipse_width = max(text_width + 16, ellipse_height)
-                            
-                            if x_pos + ellipse_width > video_width - x_margin:
-                                break
-                            
-                            center_x = x_pos + ellipse_width // 2
-                            center_y = y_offset + ellipse_height // 2
-                            
-                            # Draw ellipse with question color
-                            draw.ellipse([x_pos, y_offset, x_pos + ellipse_width, y_offset + ellipse_height],
-                                        fill=(50, 55, 65), outline=COLORS['question'], width=2)
-                            
-                            # Center text
-                            text_x = center_x - text_width // 2
-                            text_y = center_y - 6
-                            draw.text((text_x, text_y), decoded, fill=COLORS['question'], font=small_font)
-                            
-                            x_pos += ellipse_width + 6
-                        
-                        y_offset += 38
+                    current_y = gt_line_y + 45
                     
-                    # Ground Truth Section (for answer part)
-                    if pos < num_question_tokens:
-                        section_label = "GROUND TRUTH (Question + Answer)"
-                    else:
-                        section_label = "GROUND TRUTH (Answer)"
-                        
-                    draw.text((x_margin, y_offset), section_label, fill=COLORS['gt_text'], font=title_font)
-                    y_offset += 28
+                    # --- PREDICTIONS ---
+                    draw.text((margin_x, current_y), "MODEL PREDICTION:", fill=COLORS['header'], font=header_font)
+                    current_y += 25
                     
-                    # Draw GT tokens
-                    x_pos = x_margin
-                    ellipse_height = 32
-                    display_end = pos + 1 if pos < num_question_tokens else (pos + 1)
+                    pred_x = margin_x
+                    pred_line_y = current_y
                     
-                    for i, token in enumerate(gt_tokens[:display_end]):
-                        # Calculate ellipse width
-                        text_bbox = draw.textbbox((0, 0), token, font=mono_font)
-                        text_width = text_bbox[2] - text_bbox[0]
-                        ellipse_width = max(text_width + 20, ellipse_height)
-                        
-                        if x_pos + ellipse_width > video_width - x_margin:
-                            break
-                        
-                        center_x = x_pos + ellipse_width // 2
-                        center_y = y_offset + ellipse_height // 2
-                        
-                        # Use different color for question tokens
-                        outline_color = COLORS['question'] if i < num_question_tokens else COLORS['gt_text']
-                        text_color = COLORS['question'] if i < num_question_tokens else COLORS['gt_text']
-                        
-                        # Draw ellipse
-                        draw.ellipse([x_pos, y_offset, x_pos + ellipse_width, y_offset + ellipse_height],
-                                    fill=(50, 55, 65), outline=outline_color, width=2)
-                        
-                        # Center text
-                        text_x = center_x - text_width // 2
-                        text_y = center_y - 7
-                        draw.text((text_x, text_y), token, fill=text_color, font=mono_font)
-                        
-                        x_pos += ellipse_width + 8
-                    
-                    y_offset += 42
-                    
-                    # Prediction Section
-                    draw.text((x_margin, y_offset), "PREDICTIONS", fill=COLORS['pred_text'], font=title_font)
-                    
-                    # Calculate accuracy (only for answer part if past questions)
-                    correct_count = 0
-                    total_count = pos + 1
-                    
-                    if pos >= num_question_tokens:
-                        # Only count answer accuracy
-                        answer_pos = pos - num_question_tokens
-                        for i in range(answer_pos + 1):
-                            if i < len(answer_gt) and answer_predictions[i].item() == answer_gt[i].item():
-                                correct_count += 1
-                        total_count = answer_pos + 1
-                        acc_label = "Answer Acc:"
-                    else:
-                        # Include all tokens
-                        for i in range(pos + 1):
-                            if i < len(ground_truth) and text_predictions[i].item() == ground_truth[i].item():
-                                correct_count += 1
-                        acc_label = "Acc:"
-                    
-                    accuracy = (correct_count / max(total_count, 1)) * 100
-                    
-                    # Draw accuracy badge
-                    acc_text = f"{acc_label} {accuracy:.0f}%"
-                    acc_color = COLORS['correct'] if accuracy >= 70 else (COLORS['accent'] if accuracy >= 50 else COLORS['incorrect'])
-                    draw.text((video_width - x_margin - 150, y_offset), acc_text, 
-                            fill=acc_color, font=title_font)
-                    
-                    y_offset += 28
-                    
-                    # Draw prediction tokens
-                    x_pos = x_margin
                     for i in range(pos + 1):
-                        pred_token = text_predictions[i].item()
-                        confidence = text_confidences[i].item()
-                        
-                        if self.tokenizer:
-                            try:
-                                decoded = self.tokenizer.decode([pred_token]).strip()
-                                if not decoded or decoded in ['[CLS]', '[SEP]', '[PAD]']:
-                                    decoded = f"[{pred_token}]"
-                            except:
-                                decoded = f"[{pred_token}]"
-                        else:
-                            decoded = f"[{pred_token}]"
-                        
-                        # Check correctness
-                        is_correct = (i < len(ground_truth) and pred_token == ground_truth[i].item())
-                        
-                        # Use question color for first 4 tokens, then correct/incorrect
+                        token_id = text_predictions[i].item()
+                        try:
+                            word = self.tokenizer.decode([token_id]).replace("Ġ", "")
+                            if word.strip() == "": word = "␣"
+                        except:
+                            word = "?"
+                            
+                        # Color Logic
                         if i < num_question_tokens:
-                            token_color = COLORS['question']
+                            color = COLORS['question']
                         else:
-                            token_color = COLORS['correct'] if is_correct else COLORS['incorrect']
+                            is_correct = (i < len(ground_truth) and token_id == ground_truth[i].item())
+                            color = COLORS['correct'] if is_correct else COLORS['incorrect']
                         
-                        # Calculate ellipse dimensions
-                        text_bbox = draw.textbbox((0, 0), decoded, font=mono_font)
-                        text_width = text_bbox[2] - text_bbox[0]
-                        ellipse_height = 32
-                        ellipse_width = max(text_width + 20, ellipse_height)
+                        # Draw Text
+                        draw.text((pred_x, pred_line_y), word, fill=color, font=main_font)
                         
-                        if x_pos + ellipse_width > video_width - x_margin:
-                            break
+                        # Active Cursor Underline
+                        w_bbox = draw.textbbox((0,0), word, font=main_font)
+                        word_width = w_bbox[2] - w_bbox[0]
                         
-                        center_x = x_pos + ellipse_width // 2
-                        center_y = y_offset + ellipse_height // 2
-                        
-                        # Glow effect for last token
                         if i == pos:
-                            draw.ellipse([x_pos - 3, y_offset - 3, 
-                                        x_pos + ellipse_width + 3, y_offset + ellipse_height + 3],
-                                        fill=None, outline=token_color, width=3)
+                            draw.line([(pred_x, pred_line_y + 25), (pred_x + word_width, pred_line_y + 25)], 
+                                     fill=COLORS['separator'], width=3)
+
+                        # Advance X with spacing
+                        pred_x += word_width + TOKEN_PADDING
                         
-                        # Draw main ellipse
-                        draw.ellipse([x_pos, y_offset, x_pos + ellipse_width, y_offset + ellipse_height],
-                                    fill=(50, 55, 65), outline=token_color, width=2)
-                        
-                        # Center text
-                        text_x = center_x - text_width // 2
-                        text_y = center_y - 7
-                        draw.text((text_x, text_y), decoded, fill=token_color, font=mono_font)
-                        
-                        # Confidence indicator
-                        if confidence > 0:
-                            arc_y = y_offset + ellipse_height + 3
-                            arc_width = int(ellipse_width * confidence)
-                            arc_x = center_x - arc_width // 2
-                            draw.rectangle([arc_x, arc_y, arc_x + arc_width, arc_y + 3],
-                                        fill=token_color)
-                        
-                        x_pos += ellipse_width + 8
-                    
-                    # Convert to numpy array
-                    frame_array = np.array(frame_img, dtype=np.uint8)
-                    frames.append(frame_array)
+                        # Wrap
+                        if pred_x > video_width - margin_x - 50:
+                            pred_x = margin_x
+                            pred_line_y += LINE_HEIGHT
+
+                    # 3. Save Frame
+                    final_frame = Image.alpha_composite(frame, overlay)
+                    frames.append(np.array(final_frame.convert("RGB")))
                 
-                # Save video
+                # Write Video
                 if frames:
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     video_path = f"./videos/token_pred_step{step}_sample{sample_idx}_{timestamp}.mp4"
-                    
-                    imageio.mimwrite(video_path, frames, fps=fps, codec='libx264', 
-                                    quality=8, pixelformat='yuv420p')
+                    imageio.mimwrite(video_path, frames, fps=fps, codec='libx264', quality=9)
                     saved_paths.append(video_path)
-                    print(f"✓ Saved enhanced token prediction video: {video_path}")
-            
+                    print(f"✓ Saved video: {video_path}")
+
             except Exception as e:
-                print(f"Warning: Could not generate video for sample {sample_idx}: {e}")
+                print(f"Error processing sample {sample_idx}: {e}")
                 import traceback
                 traceback.print_exc()
                 continue
-        
+                
         return saved_paths
-
     def train_epoch(self, epoch):
         self.model.train()
         total_loss = 0
@@ -832,10 +696,11 @@ class BasicVLMTrainer:
             targets.reshape(-1)  # targets are already shifted and padded properly
             )
             
+            # for debugging
             # Print output IDs (predictions) after loss calculation
             output_ids = torch.argmax(outputs_for_loss, dim=-1)  # [B, seq_len]
             
-            # for debugging
+            
             #print(output_ids[0], "output ids")
 
             # Backward pass
@@ -1089,7 +954,7 @@ if __name__ == "__main__":
     print("\nCreating dataloaders...")
     dataloaders = create_vlm_dataloaders(
         coco_dataset,
-        batch_size=24,
+        batch_size=8,
         num_workers=4,
         tokenizer=tokenizer,
         max_length=17

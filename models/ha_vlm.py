@@ -13,7 +13,7 @@ class HaloVLM(nn.Module):
         self.decoder_transformer = DecoderTransformer(num_layers=16, emb_dim=emb_dim, num_heads=32, mlp_dim=1024, drop_fact=0.0)
         self.token_emb = nn.Embedding(vocab_size, emb_dim)
         self.pos_embed = nn.Embedding(5000, emb_dim)
-        self.ln_f = nn.LayerNorm(emb_dim)
+        self.layer_norm = nn.LayerNorm(emb_dim)
         self.lm_head = LMHead(hidden_size=emb_dim, vocab_size=vocab_size)
         self.image_projector = ImageProjector(vision_dim=emb_dim, llm_dim=emb_dim)
     
@@ -32,6 +32,7 @@ class HaloVLM(nn.Module):
         pos_emb = self.pos_embed(torch.arange(combined_embeds.size(1),device=device)).unsqueeze(0).repeat(B, 1, 1)
         combined_embeds = combined_embeds + pos_emb
         transformer_out=self.decoder_transformer(combined_embeds)
+        transformer_out = self.layer_norm(transformer_out)
         final_out=self.lm_head(transformer_out)
         return final_out
 

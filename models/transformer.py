@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
+from models.moe import DeepseekMoE
+
 
 
 class SelfAttn(nn.Module):
@@ -113,12 +115,16 @@ class TransformerBlock(nn.Module):
         # after input
         self.norm1 = nn.LayerNorm(emb_dim)
         
-        self.mlp = nn.Sequential(
-            nn.Linear(emb_dim, mlp_dim),
-            nn.GELU(),
-            nn.Linear(mlp_dim, emb_dim),
-            nn.Dropout(drop_fact)
-        )
+        # TODO Need to use the 4 * emb dim
+        # self.mlp = nn.Sequential(
+        #     nn.Linear(emb_dim, mlp_dim),
+        #     nn.GELU(),
+        #     nn.Linear(mlp_dim, emb_dim),
+        #     nn.Dropout(drop_fact)
+        # )
+        # TODO need to get this from config
+        self.hid_dim = round(emb_dim * 1.2) # for expansion and contraction
+        self.moe = DeepseekMoE(emb_dim,self.hid_dim,num_router_exprts=16,best_k=4,num_shared_exprts=2)
         # before ffn
         self.norm2 = nn.LayerNorm(emb_dim)
         
@@ -127,8 +133,8 @@ class TransformerBlock(nn.Module):
         attn_output = self.attn(self.norm1(inputs))
         x = inputs + attn_output  # Residual connection
         
-        # Feed-forward block
-        mlp_output = self.mlp(self.norm2(x))
+        # Feed-forward block replaced for moe
+        mlp_output = self.moe(self.norm2(x))
         output = x + mlp_output  # Residual connection
         
         return output
